@@ -13,66 +13,51 @@ needs **no Tailscale installation** and no account; all it needs is Docker.
 - A BaaS user that belongs to a tenant which the operator has enabled
 - A **one-time exit key** from the BaaS Console
 
-## 1. Build the image
+## Start (one command)
 
 ```sh
 git clone https://github.com/servas-ai/baas-exit-docker.git
 cd baas-exit-docker
-docker build -t baas-exit:local .
+./up.sh            # if Docker needs root: sudo ./up.sh
 ```
 
-The base is the official `tailscale/tailscale` image, pinned by digest in the
-`Dockerfile`. Override it with `--build-arg TAILSCALE_IMAGE=...` only if you
-know why.
+`up.sh` builds the image, asks for the one-time exit key (hidden input) and
+starts the container with restart policy `unless-stopped`.
 
-## 2. Get a one-time exit key
-
-BaaS Console → **Tenant & exit keys → Issue one-time key**.
-
-The key is valid for 10 minutes, works once and is shown once. Do not paste it
-into files, chats or your shell history.
-
-## 3. Start the exit node
-
-```bash
-read -r -s -p 'One-time exit key: ' TS_AUTHKEY; printf '\n'
-export TS_AUTHKEY
-docker run -d --pull=never --name baas-exit --restart=no --log-driver=none \
-  --cap-add=NET_ADMIN --device=/dev/net/tun \
-  --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv6.conf.all.forwarding=1 \
-  --read-only --tmpfs /run:rw,nosuid,nodev --tmpfs /tmp:rw,nosuid,nodev \
-  --env TS_AUTHKEY --env TS_HOSTNAME=baas-exit \
-  baas-exit:local
-unset TS_AUTHKEY
-```
-
-`TS_HOSTNAME` is the name the node gets in the BaaS Console (letters, digits,
-`-`; default `baas-exit`).
+Get the key in the BaaS Console: **Tenant & exit keys -> Issue one-time key**.
+It is valid for 10 minutes, works once and is shown once. Do not paste it into
+files, chats or your shell history.
 
 Then in the Console choose **Refresh status**: the node appears under
-**Available tenant exits** as **online**. Once the operator has set it as your
-tenant's default exit, sessions use it automatically:
+**Available tenant exits** as **online**. Once it is your tenant's default exit
+(the operator sets that once), sessions use it automatically:
 
 ```sh
 bcli session create --wait
 ```
 
-The public IP the browser shows must match the public IP of this Docker host.
+The public IP the browser shows is the public IP of this Docker host.
 
-## Stop and restart
+Optional settings: `TS_HOSTNAME=my-exit ./up.sh` (node name shown in the
+Console; letters, digits, `-`; default `baas-exit`), `NAME=...` (container
+name).
+
+## Restarts and reboots
+
+The node identity is saved in the Docker volume `baas-exit-state`. The key is
+only needed the very first time: after `docker restart`, a Docker restart or
+a host reboot the container comes back by itself and reconnects without a key.
+Running `./up.sh` again is safe; it does nothing if the node is already running.
 
 ```sh
-docker stop baas-exit
+docker logs baas-exit       # status
+docker stop baas-exit       # stop (stays stopped, also after reboot)
+./up.sh                     # start again, no key needed
+./up.sh --reset             # forget the identity and enroll with a new key
 ```
 
-While it is stopped, new sessions fail and running sessions lose internet
-access (there is no fallback route). The node identity lives only in memory,
-so a restart needs a **fresh key and a fresh container**:
-
-```sh
-docker rm baas-exit
-# issue a new one-time key, then run step 3 again
-```
+While the node is stopped, new sessions fail and running sessions lose
+internet access (there is no fallback route).
 
 ## Security
 
@@ -81,8 +66,9 @@ docker rm baas-exit
   files, logs or image layers. Still: never run `docker inspect` on the
   container or export its environment, because Docker keeps the variable the
   host passed in.
-- No persistent state: `tailscaled` runs with `--state=mem:`. Do not add a
-  state volume and do not use host networking.
+- The only persistent data is the node identity in the volume
+  `baas-exit-state` (needed to survive reboots). Remove it with
+  `./up.sh --reset`. Do not use host networking.
 - Built-in firewall rules in the container:
   - the node cannot open new connections into the BaaS network,
   - nothing from the BaaS network can open connections to the node itself,
@@ -99,4 +85,5 @@ docker rm baas-exit
 | File | Purpose |
 | --- | --- |
 | `Dockerfile` | official Tailscale image + nftables + entrypoint |
-| `entrypoint.sh` | firewall rules, in-memory `tailscaled`, one-shot enrollment |
+| `up.sh` | build, ask for the key, start with `unless-stopped` |
+| `entrypoint.sh` | firewall rules, `tailscaled`, one-shot enrollment, reconnect with saved identity |
