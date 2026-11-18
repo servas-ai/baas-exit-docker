@@ -39,8 +39,8 @@ bcli session create --wait
 The public IP the browser shows is the public IP of this Docker host.
 
 Optional settings: `TS_HOSTNAME=my-exit ./up.sh` (node name shown in the
-Console; letters, digits, `-`; default `baas-exit`), `NAME=...` (container
-name).
+Console; letters, digits, `-`; default `baas-exit`; fixed at the first
+enrollment, later runs keep it), `NAME=...` (container name).
 
 ## Restarts and reboots
 

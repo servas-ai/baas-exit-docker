@@ -80,6 +80,12 @@ while :; do
   sleep 0.1
 done
 
+if [ "$backend" != NeedsLogin ]; then
+  # Keep the name chosen at enrollment: the tenant's default exit refers to it.
+  saved=$(tailscale --socket="$sock" debug prefs 2>/dev/null \
+    | sed -n 's/.*"Hostname": *"\([a-zA-Z0-9-]*\)".*/\1/p' | head -n 1) || true
+  [ -n "$saved" ] && hostname=$saved
+fi
 set -- --hostname="$hostname" --advertise-exit-node --accept-routes=false \
   --accept-dns=false --ssh=false --timeout=60s
 if [ "$backend" = NeedsLogin ]; then
