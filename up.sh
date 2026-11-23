@@ -5,19 +5,42 @@
 #   ./up.sh            start (asks for the key only if not enrolled yet)
 #   ./up.sh --reset    forget the saved identity and enroll again (new key)
 #
-# Settings (optional): NAME=baas-exit  TS_HOSTNAME=baas-exit  IMAGE=baas-exit:local
+# Settings (optional): TS_HOSTNAME=<exit name>  NAME=<container name, default: exit name>  IMAGE=baas-exit:local
+# Without TS_HOSTNAME, up.sh asks for the exit node name (BaaS Console -> Tenant -> "Default exit node").
 set -euo pipefail
 cd "$(dirname "$0")"
 
-NAME=${NAME:-baas-exit}
-TS_HOSTNAME=${TS_HOSTNAME:-baas-exit}
-IMAGE=${IMAGE:-baas-exit:local}
-VOLUME="${NAME}-state"
-
 die() { printf 'error: %s\n' "$1" >&2; exit 1; }
+
+if [ -z "${TS_HOSTNAME:-}" ]; then
+  if [ -t 0 ]; then
+    echo "Exit node name: use the \"Default exit node\" shown in the BaaS Console (Tenant page)."
+    read -r -p 'Exit node name [baas-exit]: ' TS_HOSTNAME || true
+    TS_HOSTNAME=$(printf '%s' "$TS_HOSTNAME" | tr -d '[:space:]')
+  fi
+  TS_HOSTNAME=${TS_HOSTNAME:-baas-exit}
+fi
+case "$TS_HOSTNAME" in
+  *[!a-z0-9-]*|-*|*-|'') die "exit node name must be lowercase letters, digits and '-' (got: $TS_HOSTNAME)" ;;
+esac
+[ "${#TS_HOSTNAME}" -le 63 ] || die 'exit node name is longer than 63 characters'
+IMAGE=${IMAGE:-baas-exit:local}
+
 command -v docker >/dev/null || die 'docker is not installed'
 docker info >/dev/null 2>&1 || die 'cannot talk to Docker (try: sudo ./up.sh)'
 [ -c /dev/net/tun ] || die '/dev/net/tun is missing on this host'
+
+# Container name: NAME, else the exit name. An exit started by an older up.sh
+# (container and volume "baas-exit") keeps its container and saved identity.
+if [ -z "${NAME:-}" ]; then
+  if docker container inspect baas-exit >/dev/null 2>&1 || docker volume inspect baas-exit-state >/dev/null 2>&1; then
+    NAME=baas-exit
+  else
+    NAME=$TS_HOSTNAME
+  fi
+fi
+VOLUME="${NAME}-state"
+echo "Exit node name: $TS_HOSTNAME (container $NAME)"
 
 if [ "${1:-}" = --reset ]; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
